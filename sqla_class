@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+#coding: utf-8
+
+__author__ = "İlter Engin KIZILGÜN"
+
+import os
+import sys
+import enum
+import re
+
+
+try:
+	from sqlalchemy import *
+	from sqlalchemy.ext.declarative import declarative_base
+	from sqlalchemy.orm import sessionmaker
+except:
+	print "You must to install sql alchemy"
+
+
+
+def get_arg(keyword, defaultValue=0):
+	tokens = " ".join(sys.argv[1:])
+	tokens = re.split("\=|\s|\"|\'", tokens)
+	tokens = [x.strip() for x in tokens if len(x)>0]
+	for i in range(len(tokens)-1):
+		token_v1 = keyword
+		token_v2 = "-%s" % keyword
+		token_v3 = "--%s" % keyword
+		if tokens[i] in [token_v2, token_v2, token_v3]:
+			return tokens[i+1]
+	return defaultValue
+
+
+DB_USER = get_arg("db_user", "root")
+DB_PASS = get_arg("db_pass", "123456")
+DB_NAME = get_arg("db_name", "xxx")
+DB_HOST = get_arg("db_host", "localhost")
+DB_CHARSET = get_arg("db_charset", "utf8")
+WRITE_FILE = get_arg("filename", False)
+
+try:
+	conn_string = "mysql://%s:%s@%s/%s?charset=%s" % (DB_USER, DB_PASS, DB_HOST, DB_NAME, DB_CHARSET)
+	engine = create_engine(conn_string, encoding=DB_CHARSET, echo=False).connect()
+except:
+	print "connection string: ", conn_string
+	print "You have a problem with connection. Please control db_name, db_host,... "
+	sys.exit(-1)
+
+table_names = [table[0] for table in engine.execute("show tables").fetchall()]
+
+
+def create_enum(enum_name, members):
+	clazz = "class %s(enum.Enum):\n" % enum_name
+	for member in members:
+		clazz = "%s\t%s = \"%s\"\n" % (clazz, member, member)
+	return clazz
+
+def str_camelcase(tokens):
+	return tokens[0] + "".join(x.capitalize() for x in tokens[1:])
+
+def get_col_type(col_type):
+	col_type = col_type.lower()
+	if col_type == "double":
+		return "FLOAT"
+	return col_type.upper()
+
+def get_shaped_name(name):
+	 return str_camelcase(name.split('_'))
+
+
+produced_list = list()
+
+for table in table_names:
+	clazz_name = "" .join(x.capitalize() for x in table.split('_'))
+	table_str = "class %s(Base):\n" % clazz_name
+	gen_rows = list()
+	col_props = engine.execute("DESCRIBE `%s`" % table).fetchall()
+	for col_prop in col_props:
+		#print col_prop
+		col_name = col_prop[0]
+		col_shaped_name = get_shaped_name(col_name)
+		col_type = col_prop[1]
+		col_basic_type = get_col_type(col_type.split('(')[0])
+		col_can_null = col_prop[2]
+		col_key = col_prop[3]
+		col_default = col_prop[4]
+		col_extra = col_prop[5]
+
+		if 'enum' in col_type:
+			enum_name = clazz_name + col_name.capitalize()
+			tokens = [x.strip() for x in  re.split("\(|\)|\'|\,",col_type) if len(x)>1][1:]
+			produced_list.append(create_enum(enum_name, tokens))
+			col_basic_type = "Enum(%s)" % enum_name
+
+		table_str += "\t%s = Column('%s', %s, nullable=%r" % (col_shaped_name, col_name, col_basic_type, col_default == 'NULL')
+		if col_key == 'PRI':
+			table_str += ", primary_key=True"
+		if col_extra == 'auto_increment':
+			table_str += ", autoincrement=True"
+		table_str += ")\n"
+
+	produced_list.append(table_str)
+
+
+
+
+engine.close()
+
+if not WRITE_FILE:
+	for i in produced_list:
+		print i
+else:
+	f = open(WRITE_FILE, 'w')
+	for i in produced_list:
+		f.write(i + "\n")
+	f.close()
+	print "All classes wrote  %s successfully..." % WRITE_FILE
+
+
