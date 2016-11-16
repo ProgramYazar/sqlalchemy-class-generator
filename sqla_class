@@ -71,6 +71,7 @@ produced_list = list()
 for table in table_names:
 	clazz_name = "".join(x.capitalize() for x in table.split('_'))
 	table_str = "class %s(Base):\n" % clazz_name
+	table_str += "\t__tablename__ = \"%s\"\n" % table
 	gen_rows = list()
 	col_props = engine.execute("DESCRIBE `%s`" % table).fetchall()
 	for col_prop in col_props:
